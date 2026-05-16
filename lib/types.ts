@@ -1,9 +1,17 @@
 export type Score = 1 | 2 | 3 | 4 | 5;
 
+export type LogPhoto = {
+  dataUrl: string;
+  name: string;
+  type: string;
+  size: number;
+};
+
 export type DailyLog = {
   id: string;
   date: string;
   createdAt: string;
+  photo?: LogPhoto;
   face: {
     skin: Score;
     hair: Score;
@@ -47,6 +55,7 @@ export type Quest = {
   stars: string;
   completed: boolean;
   completedAt?: string;
+  completionMemo?: string;
 };
 
 export type CategoryScores = {
