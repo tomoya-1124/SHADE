@@ -1,6 +1,12 @@
+import { createSignedImageUrl } from "./logImagesStorage";
 import { calculateScores } from "./scoring";
-import { isSupabaseConfigured, supabase, type Database, type Json } from "./supabase";
-import type { DailyLog, Score } from "./types";
+import {
+  getSupabaseClient,
+  isSupabaseConfigured,
+  type Database,
+  type Json,
+} from "./supabase";
+import type { DailyLog, LogPhoto, Score } from "./types";
 
 type DailyLogRow = Database["public"]["Tables"]["daily_logs"]["Row"];
 type DailyLogInsert = Database["public"]["Tables"]["daily_logs"]["Insert"];
@@ -14,9 +20,15 @@ export type SupabaseDailyLogFetchResult = SupabaseDailyLogResult & {
   logs: DailyLog[];
 };
 
-const isScore = (value: unknown): value is Score => typeof value === "number" && value >= 1 && value <= 5 && Number.isInteger(value);
-const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
-const textOrEmpty = (value: unknown) => (typeof value === "string" ? value : "");
+const isScore = (value: unknown): value is Score =>
+  typeof value === "number" &&
+  value >= 1 &&
+  value <= 5 &&
+  Number.isInteger(value);
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+const textOrEmpty = (value: unknown) =>
+  typeof value === "string" ? value : "";
 
 function fallbackLog(row: DailyLogRow): DailyLog {
   return {
@@ -27,7 +39,12 @@ function fallbackLog(row: DailyLogRow): DailyLog {
     body: { trained: false, posture: 3 },
     food: { sweets: false, juice: false, lowCarb: false, vegetables: false },
     mind: { mental: 3, confidence: 3, stress: 3 },
-    presence: { blackFit: 3, composedOutside: 3, ignoredGaze: 3, enteredStores: 3 },
+    presence: {
+      blackFit: 3,
+      composedOutside: 3,
+      ignoredGaze: 3,
+      enteredStores: 3,
+    },
     memo: {
       note: row.memo ?? "",
       good: row.good_point ?? "",
@@ -36,12 +53,33 @@ function fallbackLog(row: DailyLogRow): DailyLog {
   };
 }
 
-export function dailyLogToSupabaseInsert(log: DailyLog): DailyLogInsert {
+function remotePhoto(photo?: LogPhoto): LogPhoto | undefined {
+  if (!photo) return undefined;
+  return {
+    storagePath: photo.storagePath,
+    publicUrl: photo.publicUrl,
+    name: photo.name,
+    type: photo.type,
+    size: photo.size,
+  };
+}
+
+function remoteRawData(log: DailyLog): DailyLog {
+  return {
+    ...log,
+    photo: remotePhoto(log.photo),
+  };
+}
+
+export function dailyLogToSupabaseInsert(
+  log: DailyLog,
+  userId: string,
+): DailyLogInsert {
   const scores = calculateScores(log);
 
   return {
     id: log.id,
-    user_id: null,
+    user_id: userId,
     date: log.date,
     face_score: scores.face,
     body_score: scores.body,
@@ -52,12 +90,14 @@ export function dailyLogToSupabaseInsert(log: DailyLog): DailyLogInsert {
     memo: log.memo.note || null,
     good_point: log.memo.good || null,
     improvement: log.memo.tomorrow || null,
-    raw_data: log as unknown as Json,
+    raw_data: remoteRawData(log) as unknown as Json,
     created_at: log.createdAt,
   };
 }
 
-export function dailyLogFromSupabaseRow(row: DailyLogRow): DailyLog {
+export async function dailyLogFromSupabaseRow(
+  row: DailyLogRow,
+): Promise<DailyLog> {
   if (!isRecord(row.raw_data)) return fallbackLog(row);
 
   const raw = row.raw_data;
@@ -67,19 +107,14 @@ export function dailyLogFromSupabaseRow(row: DailyLogRow): DailyLog {
   const mind = isRecord(raw.mind) ? raw.mind : {};
   const presence = isRecord(raw.presence) ? raw.presence : {};
   const memo = isRecord(raw.memo) ? raw.memo : {};
-  const photo = isRecord(raw.photo) && typeof raw.photo.dataUrl === "string"
-    ? {
-        dataUrl: raw.photo.dataUrl,
-        name: textOrEmpty(raw.photo.name),
-        type: textOrEmpty(raw.photo.type),
-        size: typeof raw.photo.size === "number" ? raw.photo.size : 0,
-      }
-    : undefined;
+  const photo = await restorePhoto(raw.photo);
 
   return {
     id: row.id,
     date: row.date,
-    createdAt: row.created_at ?? (textOrEmpty(raw.createdAt) || new Date().toISOString()),
+    createdAt:
+      row.created_at ??
+      (textOrEmpty(raw.createdAt) || new Date().toISOString()),
     photo,
     face: {
       skin: isScore(face.skin) ? face.skin : 3,
@@ -97,7 +132,8 @@ export function dailyLogFromSupabaseRow(row: DailyLogRow): DailyLog {
       sweets: typeof food.sweets === "boolean" ? food.sweets : false,
       juice: typeof food.juice === "boolean" ? food.juice : false,
       lowCarb: typeof food.lowCarb === "boolean" ? food.lowCarb : false,
-      vegetables: typeof food.vegetables === "boolean" ? food.vegetables : false,
+      vegetables:
+        typeof food.vegetables === "boolean" ? food.vegetables : false,
       water: typeof food.water === "number" ? food.water : undefined,
     },
     mind: {
@@ -107,9 +143,13 @@ export function dailyLogFromSupabaseRow(row: DailyLogRow): DailyLog {
     },
     presence: {
       blackFit: isScore(presence.blackFit) ? presence.blackFit : 3,
-      composedOutside: isScore(presence.composedOutside) ? presence.composedOutside : 3,
+      composedOutside: isScore(presence.composedOutside)
+        ? presence.composedOutside
+        : 3,
       ignoredGaze: isScore(presence.ignoredGaze) ? presence.ignoredGaze : 3,
-      enteredStores: isScore(presence.enteredStores) ? presence.enteredStores : 3,
+      enteredStores: isScore(presence.enteredStores)
+        ? presence.enteredStores
+        : 3,
     },
     memo: {
       note: row.memo ?? textOrEmpty(memo.note),
@@ -119,14 +159,45 @@ export function dailyLogFromSupabaseRow(row: DailyLogRow): DailyLog {
   };
 }
 
-export async function fetchDailyLogsFromSupabase(): Promise<SupabaseDailyLogFetchResult> {
+async function restorePhoto(value: unknown): Promise<LogPhoto | undefined> {
+  if (!isRecord(value)) return undefined;
+
+  const storagePath = textOrEmpty(value.storagePath) || undefined;
+  const signedUrl = storagePath
+    ? await createSignedImageUrl(storagePath)
+    : textOrEmpty(value.signedUrl) || undefined;
+  const publicUrl = textOrEmpty(value.publicUrl) || undefined;
+  const dataUrl = textOrEmpty(value.dataUrl) || undefined;
+
+  if (!storagePath && !signedUrl && !publicUrl && !dataUrl) return undefined;
+
+  return {
+    dataUrl,
+    storagePath,
+    publicUrl,
+    signedUrl,
+    name: textOrEmpty(value.name),
+    type: textOrEmpty(value.type),
+    size: typeof value.size === "number" ? value.size : 0,
+  };
+}
+
+export async function fetchDailyLogsFromSupabase(
+  userId: string,
+): Promise<SupabaseDailyLogFetchResult> {
+  const supabase = await getSupabaseClient();
   if (!isSupabaseConfigured || !supabase) {
-    return { status: "skipped", message: "Supabase env is not configured. Using localStorage backup.", logs: [] };
+    return {
+      status: "skipped",
+      message: "Supabase env is not configured. Using localStorage backup.",
+      logs: [],
+    };
   }
 
   const { data, error } = await supabase
     .from("daily_logs")
     .select("*")
+    .eq("user_id", userId)
     .order("date", { ascending: false })
     .order("created_at", { ascending: false });
 
@@ -137,22 +208,32 @@ export async function fetchDailyLogsFromSupabase(): Promise<SupabaseDailyLogFetc
   return {
     status: "success",
     message: `Supabaseから${data.length}件のDaily Logを取得しました。`,
-    logs: data.map(dailyLogFromSupabaseRow),
+    logs: await Promise.all(data.map(dailyLogFromSupabaseRow)),
   };
 }
 
-export async function insertDailyLogToSupabase(log: DailyLog): Promise<SupabaseDailyLogResult> {
+export async function insertDailyLogToSupabase(
+  log: DailyLog,
+  userId: string,
+): Promise<SupabaseDailyLogResult> {
+  const supabase = await getSupabaseClient();
   if (!isSupabaseConfigured || !supabase) {
-    return { status: "skipped", message: "Supabase env is not configured. Saved to localStorage only." };
+    return {
+      status: "skipped",
+      message: "Supabase env is not configured. Saved to localStorage only.",
+    };
   }
 
   const { error } = await supabase
     .from("daily_logs")
-    .insert(dailyLogToSupabaseInsert(log));
+    .insert(dailyLogToSupabaseInsert(log, userId));
 
   if (error) {
     return { status: "error", message: error.message };
   }
 
-  return { status: "success", message: "SupabaseにもDaily Logを保存しました。" };
+  return {
+    status: "success",
+    message: "SupabaseにもDaily Logを保存しました。",
+  };
 }

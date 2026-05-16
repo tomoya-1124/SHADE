@@ -1,7 +1,10 @@
 export type Score = 1 | 2 | 3 | 4 | 5;
 
 export type LogPhoto = {
-  dataUrl: string;
+  dataUrl?: string;
+  storagePath?: string;
+  publicUrl?: string;
+  signedUrl?: string;
   name: string;
   type: string;
   size: number;

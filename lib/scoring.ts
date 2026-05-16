@@ -1,7 +1,8 @@
 import type { CategoryScores, DailyLog, Quest } from "./types";
 
 const rounded = (value: number) => Math.round(value);
-const average = (values: number[]) => values.reduce((sum, value) => sum + value, 0) / values.length;
+const average = (values: number[]) =>
+  values.reduce((sum, value) => sum + value, 0) / values.length;
 const positiveBooleanScore = (value: boolean) => (value ? 100 : 45);
 const negativeBooleanScore = (value: boolean) => (value ? 35 : 100);
 const fivePoint = (value: number) => (value / 5) * 100;
@@ -55,17 +56,27 @@ export function calculateScores(log: DailyLog): CategoryScores {
 }
 
 export function sortLogsByDate(logs: DailyLog[]) {
-  return [...logs].sort((a, b) => b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt));
+  return [...logs].sort(
+    (a, b) =>
+      b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt),
+  );
 }
 
 export function getPresenceTrend(logs: DailyLog[], limit = 7) {
   return sortLogsByDate(logs)
     .slice(0, limit)
     .reverse()
-    .map((log) => ({ date: log.date.slice(5), score: calculateScores(log).presence, total: calculateScores(log).total }));
+    .map((log) => ({
+      date: log.date.slice(5),
+      score: calculateScores(log).presence,
+      total: calculateScores(log).total,
+    }));
 }
 
-export function getScoreDelta(after: CategoryScores, before: CategoryScores): CategoryScores {
+export function getScoreDelta(
+  after: CategoryScores,
+  before: CategoryScores,
+): CategoryScores {
   return {
     face: after.face - before.face,
     body: after.body - before.body,

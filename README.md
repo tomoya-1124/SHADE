@@ -11,7 +11,7 @@ SHADE は、美容・外見・生活習慣・行動変化を記録し、自分�
 - Tailwind CSS
 - React Hooks (`useState`, `useEffect`, `useMemo`)
 - localStorage 永続化
-- Supabase PostgreSQL (`daily_logs`) へのDaily Log保存・取得
+- Supabase Auth / PostgreSQL (`daily_logs`) / Storage (`shade-log-images`)
 
 ## 起動方法
 
@@ -83,14 +83,14 @@ npm run build
 
 ## データ保存
 
-Daily Log は Supabase PostgreSQL への保存・取得に対応しています。Supabase保存に失敗した場合でも、localStorageバックアップは維持されます。
+Daily Log はログイン済みユーザーの `user_id` に紐づけて Supabase PostgreSQL へ保存・取得します。画像は Supabase Storage の `shade-log-images` bucket にアップロードし、`daily_logs.raw_data.photo.storagePath` にパスを保存します。Supabase保存に失敗した場合でも、localStorageバックアップは維持されます。
 
 localStorage には以下のキーで保存します。
 
-- `shade.dailyLogs`: Daily Log、写真Data URL、メモ、各スコア入力
+- `shade.dailyLogs.<user_id>`: Daily Log、写真Data URL、Storage path、メモ、各スコア入力
 - `shade.quests`: Quest達成状態、達成日時、達成メモ
 
-アプリ起動時は、Supabase接続が成功した場合は `daily_logs` テーブルのデータを優先して表示します。Supabaseが未設定、または取得に失敗した場合はlocalStorageデータを使用します。初回localStorageモードではサンプルログとデフォルトクエストが読み込まれます。
+ログイン後のアプリ起動時は、Supabase接続が成功した場合は自分の `user_id` の `daily_logs` データを優先して表示します。Supabase取得に失敗した場合はユーザー別localStorageデータを使用します。
 
 ## Supabase 接続手順
 
@@ -111,16 +111,27 @@ NEXT_PUBLIC_SUPABASE_URL=https://your-project-ref.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
 ```
 
-Auth は今回未実装のため、`user_id` は `null` で保存します。画像Storageも未実装で、写真は既存MVP同様に `raw_data` 内のData URLとして保存されます。
+Vercelにdeployする場合も、Project Settings → Environment Variables に同じ2つを登録します。
 
-### 3. SQL Editor
+### 3. Auth
+
+Supabase Dashboard → Authentication → Providers で Email provider を有効にしてください。SHADEはMagic Linkログインを使います。
+
+Vercel deploy後は Authentication → URL Configuration に以下を設定してください。
+
+- Site URL: `https://your-vercel-app.vercel.app`
+- Redirect URLs: `https://your-vercel-app.vercel.app/**`
+
+ローカル検証では `http://localhost:3000/**` もRedirect URLsへ追加してください。
+
+### 4. SQL Editor: `daily_logs`
 
 Supabase SQL Editor で以下を実行してください。
 
 ```sql
-create table daily_logs (
+create table if not exists daily_logs (
   id uuid primary key default gen_random_uuid(),
-  user_id uuid,
+  user_id uuid references auth.users(id),
   date date not null,
   face_score int not null,
   body_score int not null,
@@ -134,10 +145,88 @@ create table daily_logs (
   raw_data jsonb not null,
   created_at timestamp with time zone default now()
 );
+
+alter table daily_logs enable row level security;
+
+create policy "Users can read own daily logs"
+on daily_logs
+for select
+using (auth.uid() = user_id);
+
+create policy "Users can insert own daily logs"
+on daily_logs
+for insert
+with check (auth.uid() = user_id);
+
+create policy "Users can update own daily logs"
+on daily_logs
+for update
+using (auth.uid() = user_id);
+
+create policy "Users can delete own daily logs"
+on daily_logs
+for delete
+using (auth.uid() = user_id);
 ```
 
-Row Level Security を有効にする場合は、匿名キーで `select` / `insert` できるポリシーを別途追加してください。MVP検証では、プロジェクトのセキュリティ方針に合わせてRLS設定を調整してください。
+### 5. Storage bucket
+
+Supabase Dashboard → Storage で以下のbucketを作成してください。
+
+- bucket名: `shade-log-images`
+- 本運用は private bucket 推奨
+- 保存path: `user_id/yyyy-mm-dd/timestamp-filename`
+
+SHADEの実装は private bucket でも表示できるよう、取得時に signed URL を生成します。public bucketでも動きますが、本運用ではprivate bucketとRLS/Storage policyでユーザー単位に制限してください。
+
+Storage policy例（`storage.objects` に対して `bucket_id = 'shade-log-images'` かつ path先頭が `auth.uid()` のものだけ操作可能にする方針）:
+
+```sql
+create policy "Users can read own log images"
+on storage.objects
+for select
+using (
+  bucket_id = 'shade-log-images'
+  and auth.uid()::text = (storage.foldername(name))[1]
+);
+
+create policy "Users can upload own log images"
+on storage.objects
+for insert
+with check (
+  bucket_id = 'shade-log-images'
+  and auth.uid()::text = (storage.foldername(name))[1]
+);
+
+create policy "Users can update own log images"
+on storage.objects
+for update
+using (
+  bucket_id = 'shade-log-images'
+  and auth.uid()::text = (storage.foldername(name))[1]
+);
+
+create policy "Users can delete own log images"
+on storage.objects
+for delete
+using (
+  bucket_id = 'shade-log-images'
+  and auth.uid()::text = (storage.foldername(name))[1]
+);
+```
+
+### 6. Vercel deploy
+
+1. GitHub repositoryをVercelへImport
+2. Framework PresetはNext.js
+3. Environment Variablesに以下を追加
+   - `NEXT_PUBLIC_SUPABASE_URL`
+   - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+4. Build Commandは `npm run build`
+5. Deploy後、Supabase AuthのSite URL / Redirect URLsをVercel URLへ更新
+
+`next.config.ts` は標準設定のまま動作する構成です。画像はNext Image最適化ではなく通常の`img`で表示しているため、Supabase Storageドメインの追加設定は不要です。
 
 ## 注意
 
-写真はフロントエンドMVPとしてData URL形式でlocalStorageへ保存します。大きすぎる画像を多数保存するとブラウザの保存容量に達する可能性があるため、実運用では画像圧縮または外部ストレージ化を検討してください。
+写真はSupabase Storageへアップロードし、localStorageにはバックアップとしてData URLも残します。大きすぎる画像を多数保存するとブラウザの保存容量に達する可能性があるため、本運用ではアップロード前の画像圧縮を検討してください。
