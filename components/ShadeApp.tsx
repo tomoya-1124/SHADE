@@ -10,7 +10,6 @@ import {
 } from "react";
 import {
   getCurrentSession,
-  onAuthStateChange,
   signInWithMagicLink,
   signOut,
   type AuthSession,
@@ -28,6 +27,7 @@ import {
   sortLogsByDate,
 } from "@/lib/scoring";
 import { defaultQuests, LOGS_KEY, QUESTS_KEY, sampleLogs } from "@/lib/storage";
+import { supabase } from "@/lib/supabase";
 import type {
   CategoryScores,
   DailyLog,
@@ -410,17 +410,27 @@ export default function ShadeApp() {
 
     void hydrateSession();
 
-    let subscription: { unsubscribe: () => void } | undefined;
-    void onAuthStateChange((nextSession) => {
-      setSession(nextSession);
-      setAuthReady(true);
-    }).then((nextSubscription: { unsubscribe: () => void } | undefined) => {
-      subscription = nextSubscription;
-    });
+    const { data } = supabase.auth.onAuthStateChange(
+      (_event: string, nextSession: AuthSession | null) => {
+        setSession(
+          nextSession
+            ? {
+                user: {
+                  id: nextSession.user.id,
+                  email: nextSession.user.email ?? undefined,
+                },
+              }
+            : null,
+        );
+        setAuthReady(true);
+      },
+    );
+
+    const subscription = data.subscription;
 
     return () => {
       active = false;
-      subscription?.unsubscribe();
+      subscription.unsubscribe();
     };
   }, []);
 
