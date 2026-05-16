@@ -1,10 +1,49 @@
 import { createSignedImageUrl } from "./logImagesStorage";
 import { calculateScores } from "./scoring";
-import { supabase, type Database, type Json } from "./supabase";
+import { supabase } from "./supabase";
 import type { DailyLog, LogPhoto, Score } from "./types";
 
-type DailyLogRow = Database["public"]["Tables"]["daily_logs"]["Row"];
-type DailyLogInsert = Database["public"]["Tables"]["daily_logs"]["Insert"];
+type Json =
+  | string
+  | number
+  | boolean
+  | null
+  | { [key: string]: Json | undefined }
+  | Json[];
+
+type DailyLogRow = {
+  id: string;
+  user_id: string | null;
+  date: string;
+  face_score: number;
+  body_score: number;
+  mind_score: number;
+  food_score: number;
+  presence_score: number;
+  total_score: number;
+  memo: string | null;
+  good_point: string | null;
+  improvement: string | null;
+  raw_data: Json;
+  created_at: string | null;
+};
+
+type DailyLogInsert = {
+  id?: string;
+  user_id?: string | null;
+  date: string;
+  face_score: number;
+  body_score: number;
+  mind_score: number;
+  food_score: number;
+  presence_score: number;
+  total_score: number;
+  memo?: string | null;
+  good_point?: string | null;
+  improvement?: string | null;
+  raw_data: Json;
+  created_at?: string | null;
+};
 
 export type SupabaseDailyLogResult = {
   status: "success" | "error" | "skipped";
@@ -191,10 +230,12 @@ export async function fetchDailyLogsFromSupabase(
     return { status: "error", message: error.message, logs: [] };
   }
 
+  const rows = (data ?? []) as DailyLogRow[];
+
   return {
     status: "success",
-    message: `Supabaseから${data.length}件のDaily Logを取得しました。`,
-    logs: await Promise.all(data.map(dailyLogFromSupabaseRow)),
+    message: `Supabaseから${rows.length}件のDaily Logを取得しました。`,
+    logs: await Promise.all(rows.map(dailyLogFromSupabaseRow)),
   };
 }
 

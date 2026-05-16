@@ -13,6 +13,7 @@ import {
   onAuthStateChange,
   signInWithMagicLink,
   signOut,
+  type AuthSession,
 } from "@/lib/auth";
 import {
   fetchDailyLogsFromSupabase,
@@ -27,7 +28,6 @@ import {
   sortLogsByDate,
 } from "@/lib/scoring";
 import { defaultQuests, LOGS_KEY, QUESTS_KEY, sampleLogs } from "@/lib/storage";
-import { isSupabaseConfigured, type Session } from "@/lib/supabase";
 import type {
   CategoryScores,
   DailyLog,
@@ -262,11 +262,6 @@ function AuthScreen({
               Daily Logを自分のアカウントに紐づけて保存します。Magic
               Linkでログインしてください。
             </p>
-            {!isSupabaseConfigured ? (
-              <p className="rounded-2xl border border-white/10 bg-black/30 p-3 text-sm text-slate-400">
-                Supabase環境変数が未設定です。Vercelまたは.env.localに設定してください。
-              </p>
-            ) : null}
           </div>
           <form
             className="space-y-4 rounded-3xl border border-white/10 bg-black/25 p-5"
@@ -396,7 +391,7 @@ export default function ShadeApp() {
   const [compareBeforeId, setCompareBeforeId] = useState("");
   const [compareAfterId, setCompareAfterId] = useState("");
   const [syncNotice, setSyncNotice] = useState<SyncNotice | null>(null);
-  const [session, setSession] = useState<Session | null>(null);
+  const [session, setSession] = useState<AuthSession | null>(null);
   const [authReady, setAuthReady] = useState(false);
   const [authEmail, setAuthEmail] = useState("");
   const [authNotice, setAuthNotice] = useState("");
@@ -419,7 +414,7 @@ export default function ShadeApp() {
     void onAuthStateChange((nextSession) => {
       setSession(nextSession);
       setAuthReady(true);
-    }).then((nextSubscription) => {
+    }).then((nextSubscription: { unsubscribe: () => void } | undefined) => {
       subscription = nextSubscription;
     });
 

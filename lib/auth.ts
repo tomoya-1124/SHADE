@@ -1,13 +1,32 @@
-import { supabase, type Session } from "./supabase";
+import { supabase } from "./supabase";
+
+export type AuthSession = {
+  user: {
+    id: string;
+    email?: string;
+  };
+};
 
 export type AuthResult = {
   status: "success" | "error" | "skipped";
   message: string;
 };
 
-export async function getCurrentSession(): Promise<Session | null> {
+const toAuthSession = (
+  session: { user: { id: string; email?: string } } | null,
+): AuthSession | null => {
+  if (!session) return null;
+  return {
+    user: {
+      id: session.user.id,
+      email: session.user.email,
+    },
+  };
+};
+
+export async function getCurrentSession(): Promise<AuthSession | null> {
   const { data } = await supabase.auth.getSession();
-  return data.session;
+  return toAuthSession(data.session);
 }
 
 export async function signInWithMagicLink(email: string): Promise<AuthResult> {
@@ -32,10 +51,13 @@ export async function signOut(): Promise<AuthResult> {
   return { status: "success", message: "ログアウトしました。" };
 }
 
-export async function onAuthStateChange(
-  callback: (session: Session | null) => void,
+export function onAuthStateChange(
+  callback: (session: AuthSession | null) => void,
 ) {
   return supabase.auth.onAuthStateChange(
-    (_event: string, session: Session | null) => callback(session),
+    (
+      _event: string,
+      session: { user: { id: string; email?: string } } | null,
+    ) => callback(toAuthSession(session)),
   ).data.subscription;
 }
