@@ -1,4 +1,4 @@
-import { getSupabaseClient, isSupabaseConfigured } from "./supabase";
+import { supabase } from "./supabase";
 import type { LogPhoto } from "./types";
 
 export const LOG_IMAGES_BUCKET = "shade-log-images";
@@ -26,9 +26,6 @@ export function buildLogImagePath({
 }
 
 export async function createSignedImageUrl(path: string) {
-  const supabase = await getSupabaseClient();
-  if (!isSupabaseConfigured || !supabase) return undefined;
-
   const { data, error } = await supabase.storage
     .from(LOG_IMAGES_BUCKET)
     .createSignedUrl(path, 60 * 60 * 24 * 7);
@@ -46,14 +43,6 @@ export async function uploadLogImage({
   userId?: string;
   date: string;
 }): Promise<ImageUploadResult> {
-  const supabase = await getSupabaseClient();
-  if (!isSupabaseConfigured || !supabase) {
-    return {
-      status: "skipped",
-      message: "Supabase Storage is not configured.",
-    };
-  }
-
   const path = buildLogImagePath({ userId, date, fileName: file.name });
   const { error } = await supabase.storage
     .from(LOG_IMAGES_BUCKET)

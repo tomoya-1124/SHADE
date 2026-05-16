@@ -22,7 +22,7 @@ npm run dev
 
 ブラウザで `http://localhost:3000` を開いてください。
 
-Supabaseを使う場合は、先に `.env.local` を作成してください。未設定の場合はlocalStorageのみで動作します。
+起動前に `.env.local` を作成してください。`NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_ANON_KEY` が未設定の場合は明示的にエラーになります。
 
 ## ビルド / 型チェック
 

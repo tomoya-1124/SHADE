@@ -1,11 +1,6 @@
 import { createSignedImageUrl } from "./logImagesStorage";
 import { calculateScores } from "./scoring";
-import {
-  getSupabaseClient,
-  isSupabaseConfigured,
-  type Database,
-  type Json,
-} from "./supabase";
+import { supabase, type Database, type Json } from "./supabase";
 import type { DailyLog, LogPhoto, Score } from "./types";
 
 type DailyLogRow = Database["public"]["Tables"]["daily_logs"]["Row"];
@@ -185,15 +180,6 @@ async function restorePhoto(value: unknown): Promise<LogPhoto | undefined> {
 export async function fetchDailyLogsFromSupabase(
   userId: string,
 ): Promise<SupabaseDailyLogFetchResult> {
-  const supabase = await getSupabaseClient();
-  if (!isSupabaseConfigured || !supabase) {
-    return {
-      status: "skipped",
-      message: "Supabase env is not configured. Using localStorage backup.",
-      logs: [],
-    };
-  }
-
   const { data, error } = await supabase
     .from("daily_logs")
     .select("*")
@@ -216,14 +202,6 @@ export async function insertDailyLogToSupabase(
   log: DailyLog,
   userId: string,
 ): Promise<SupabaseDailyLogResult> {
-  const supabase = await getSupabaseClient();
-  if (!isSupabaseConfigured || !supabase) {
-    return {
-      status: "skipped",
-      message: "Supabase env is not configured. Saved to localStorage only.",
-    };
-  }
-
   const { error } = await supabase
     .from("daily_logs")
     .insert(dailyLogToSupabaseInsert(log, userId));
