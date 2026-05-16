@@ -21,7 +21,8 @@
     "react": "latest",
     "react-dom": "latest",
     "tailwindcss": "^3.4.17",
-    "typescript": "latest"
+    "typescript": "latest",
+    "@supabase/supabase-js": "latest"
   },
   "devDependencies": {}
 }

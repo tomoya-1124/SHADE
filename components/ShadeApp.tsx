@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState, type ChangeEvent, type ReactNode } from "react";
+import { fetchDailyLogsFromSupabase, insertDailyLogToSupabase, type SupabaseDailyLogResult } from "@/lib/dailyLogsRepository";
 import { calculateScores, getQuestDifficulty, getScoreDelta, sortLogsByDate } from "@/lib/scoring";
 import { defaultQuests, LOGS_KEY, QUESTS_KEY, sampleLogs } from "@/lib/storage";
 import type { CategoryScores, DailyLog, LogPhoto, Quest, Score } from "@/lib/types";
@@ -12,6 +13,7 @@ import { Button, Card, FieldLabel, Pill, TextArea, TextInput } from "./ui";
 
 type Tab = "dashboard" | "new" | "quests" | "logs";
 type FormState = Omit<DailyLog, "id" | "createdAt">;
+type SyncNotice = SupabaseDailyLogResult & { id: number };
 
 const today = () => new Date().toISOString().slice(0, 10);
 const scoreOptions: Score[] = [1, 2, 3, 4, 5];
@@ -186,13 +188,39 @@ export default function ShadeApp() {
   const [questMemo, setQuestMemo] = useState("");
   const [compareBeforeId, setCompareBeforeId] = useState("");
   const [compareAfterId, setCompareAfterId] = useState("");
+  const [syncNotice, setSyncNotice] = useState<SyncNotice | null>(null);
 
   useEffect(() => {
+    let active = true;
     const storedLogs = parseStoredArray<DailyLog>(window.localStorage.getItem(LOGS_KEY), sampleLogs);
     const storedQuests = parseStoredArray<Quest>(window.localStorage.getItem(QUESTS_KEY), defaultQuests);
+
     setLogs(storedLogs);
     setQuests(mergeQuests(storedQuests));
-    setHydrated(true);
+
+    async function hydrateDailyLogs() {
+      const result = await fetchDailyLogsFromSupabase();
+      if (!active) return;
+
+      if (result.status === "success") {
+        setLogs(result.logs);
+        setSyncNotice({ id: Date.now(), status: result.status, message: result.message });
+      } else if (result.status === "error") {
+        setSyncNotice({
+          id: Date.now(),
+          status: result.status,
+          message: `Supabase取得に失敗しました。localStorageバックアップを使用します: ${result.message}`,
+        });
+      }
+
+      setHydrated(true);
+    }
+
+    void hydrateDailyLogs();
+
+    return () => {
+      active = false;
+    };
   }, []);
 
   useEffect(() => {
@@ -235,16 +263,25 @@ export default function ShadeApp() {
     reader.readAsDataURL(file);
   };
 
-  const saveLog = () => {
+  const saveLog = async () => {
     const log: DailyLog = {
       ...form,
       id: crypto.randomUUID(),
       createdAt: new Date().toISOString(),
     };
-    setLogs((current) => [log, ...current.filter((item) => item.date !== log.date)]);
+    const nextLogs = [log, ...logs.filter((item) => item.date !== log.date)];
+
+    setLogs(nextLogs);
+    window.localStorage.setItem(LOGS_KEY, JSON.stringify(nextLogs));
     setForm(initialForm());
     setPhotoError("");
     setActiveTab("dashboard");
+
+    const result = await insertDailyLogToSupabase(log);
+    const message = result.status === "error"
+      ? `Supabase保存に失敗しました。localStorageバックアップは維持されています: ${result.message}`
+      : result.message;
+    setSyncNotice({ id: Date.now(), status: result.status, message });
   };
 
   const startQuestMark = (quest: Quest) => {
@@ -287,6 +324,13 @@ export default function ShadeApp() {
             ))}
           </nav>
         </header>
+
+        {syncNotice ? (
+          <div className={`flex items-start justify-between gap-4 rounded-3xl border p-4 text-sm shadow-glow ${syncNotice.status === "success" ? "border-shade-blue/40 bg-shade-blue/10 text-blue-100" : syncNotice.status === "error" ? "border-slate-400/30 bg-white/[0.04] text-slate-200" : "border-white/10 bg-black/25 text-slate-400"}`}>
+            <p className="leading-6">{syncNotice.message}</p>
+            <button type="button" className="text-xs uppercase tracking-[0.2em] text-slate-500 hover:text-slate-200" onClick={() => setSyncNotice(null)}>Close</button>
+          </div>
+        ) : null}
 
         {activeTab === "dashboard" && (
           <section className="grid gap-5 lg:grid-cols-[1.1fr_0.9fr]">
