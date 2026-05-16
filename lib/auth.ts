@@ -34,7 +34,9 @@ export async function signInWithMagicLink(email: string): Promise<AuthResult> {
     email,
     options: {
       emailRedirectTo:
-        typeof window === "undefined" ? undefined : window.location.origin,
+        typeof window === "undefined"
+          ? undefined
+          : `${window.location.origin}/auth/callback`,
     },
   });
 
