@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  useCallback,
   useEffect,
   useMemo,
   useState,
@@ -397,6 +398,8 @@ export default function ShadeApp() {
   const [authNotice, setAuthNotice] = useState("");
   const [selectedPhotoFile, setSelectedPhotoFile] = useState<File | null>(null);
   const [savingLog, setSavingLog] = useState(false);
+  const [logsLoading, setLogsLoading] = useState(false);
+  const [logsError, setLogsError] = useState("");
 
   useEffect(() => {
     let active = true;
@@ -434,6 +437,39 @@ export default function ShadeApp() {
     };
   }, []);
 
+  const fetchLogs = useCallback(
+    async (userId: string, showNotice = true) => {
+      setLogsLoading(true);
+      setLogsError("");
+
+      const result = await fetchDailyLogsFromSupabase(userId);
+
+      if (result.status === "success") {
+        setLogs(result.logs);
+        if (showNotice) {
+          setSyncNotice({
+            id: Date.now(),
+            status: result.status,
+            message: result.message,
+          });
+        }
+      } else {
+        setLogsError(result.message);
+        if (showNotice) {
+          setSyncNotice({
+            id: Date.now(),
+            status: "error",
+            message: `Supabase取得に失敗しました: ${result.message}`,
+          });
+        }
+      }
+
+      setLogsLoading(false);
+      return result;
+    },
+    [],
+  );
+
   useEffect(() => {
     if (!authReady || !session) return;
 
@@ -449,28 +485,12 @@ export default function ShadeApp() {
       defaultQuests,
     );
 
-    setLogs(storedLogs);
     setQuests(mergeQuests(storedQuests));
 
     async function hydrateDailyLogs() {
-      const result = await fetchDailyLogsFromSupabase(userId);
+      const result = await fetchLogs(userId);
       if (!active) return;
-
-      if (result.status === "success") {
-        setLogs(result.logs);
-        setSyncNotice({
-          id: Date.now(),
-          status: result.status,
-          message: result.message,
-        });
-      } else if (result.status === "error") {
-        setSyncNotice({
-          id: Date.now(),
-          status: result.status,
-          message: `Supabase取得に失敗しました。localStorageバックアップを使用します: ${result.message}`,
-        });
-      }
-
+      if (result.status !== "success") setLogs(storedLogs);
       setHydrated(true);
     }
 
@@ -479,7 +499,7 @@ export default function ShadeApp() {
     return () => {
       active = false;
     };
-  }, [authReady, session]);
+  }, [authReady, fetchLogs, session]);
 
   useEffect(() => {
     if (hydrated && session)
@@ -534,7 +554,14 @@ export default function ShadeApp() {
   };
 
   const saveLog = async () => {
-    if (!session) {
+    setSavingLog(true);
+    setLogsError("");
+
+    const { data, error } = await supabase.auth.getUser();
+    const user = data.user;
+
+    if (error || !user) {
+      setSavingLog(false);
       setSyncNotice({
         id: Date.now(),
         status: "error",
@@ -543,27 +570,16 @@ export default function ShadeApp() {
       return;
     }
 
-    setSavingLog(true);
     let log: DailyLog = {
       ...form,
       id: crypto.randomUUID(),
       createdAt: new Date().toISOString(),
     };
 
-    const localBackupLogs = [
-      log,
-      ...logs.filter((item) => item.date !== log.date),
-    ];
-    setLogs(localBackupLogs);
-    window.localStorage.setItem(
-      userLogsKey(session.user.id),
-      JSON.stringify(localBackupLogs),
-    );
-
     if (selectedPhotoFile) {
       const uploadResult = await uploadLogImage({
         file: selectedPhotoFile,
-        userId: session.user.id,
+        userId: user.id,
         date: log.date,
       });
       if (uploadResult.status === "error") {
@@ -571,7 +587,7 @@ export default function ShadeApp() {
         setSyncNotice({
           id: Date.now(),
           status: "error",
-          message: `画像保存に失敗しました。localStorageバックアップは維持されています: ${uploadResult.message}`,
+          message: `画像保存に失敗しました: ${uploadResult.message}`,
         });
         return;
       }
@@ -580,29 +596,35 @@ export default function ShadeApp() {
           ...log,
           photo: { ...uploadResult.photo, dataUrl: form.photo?.dataUrl },
         };
-        const nextLogs = [
-          log,
-          ...logs.filter((item) => item.date !== log.date),
-        ];
-        setLogs(nextLogs);
-        window.localStorage.setItem(
-          userLogsKey(session.user.id),
-          JSON.stringify(nextLogs),
-        );
       }
     }
+
+    const result = await insertDailyLogToSupabase(log, user.id);
+
+    if (result.status === "error") {
+      setSavingLog(false);
+      setSyncNotice({
+        id: Date.now(),
+        status: result.status,
+        message: `保存失敗: ${result.message}`,
+      });
+      return;
+    }
+
+    const refetchResult = await fetchLogs(user.id, false);
 
     setForm(initialForm());
     setSelectedPhotoFile(null);
     setPhotoError("");
     setActiveTab("dashboard");
-
-    const result = await insertDailyLogToSupabase(log, session.user.id);
-    const message =
-      result.status === "error"
-        ? `Supabase保存に失敗しました。localStorageバックアップは維持されています: ${result.message}`
-        : result.message;
-    setSyncNotice({ id: Date.now(), status: result.status, message });
+    setSyncNotice({
+      id: Date.now(),
+      status: refetchResult.status === "error" ? "error" : result.status,
+      message:
+        refetchResult.status === "error"
+          ? `Supabaseには保存しましたが、再取得に失敗しました: ${refetchResult.message}`
+          : result.message,
+    });
     setSavingLog(false);
   };
 
@@ -740,6 +762,18 @@ export default function ShadeApp() {
             >
               Close
             </button>
+          </div>
+        ) : null}
+
+        {logsLoading ? (
+          <div className="rounded-3xl border border-white/10 bg-black/25 p-4 text-sm text-slate-400">
+            Daily Logを取得しています。
+          </div>
+        ) : null}
+
+        {logsError ? (
+          <div className="rounded-3xl border border-slate-400/30 bg-white/[0.04] p-4 text-sm text-slate-200">
+            {logsError}
           </div>
         ) : null}
 

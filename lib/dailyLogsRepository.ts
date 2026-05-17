@@ -87,24 +87,6 @@ function fallbackLog(row: DailyLogRow): DailyLog {
   };
 }
 
-function remotePhoto(photo?: LogPhoto): LogPhoto | undefined {
-  if (!photo) return undefined;
-  return {
-    storagePath: photo.storagePath,
-    publicUrl: photo.publicUrl,
-    name: photo.name,
-    type: photo.type,
-    size: photo.size,
-  };
-}
-
-function remoteRawData(log: DailyLog): DailyLog {
-  return {
-    ...log,
-    photo: remotePhoto(log.photo),
-  };
-}
-
 export function dailyLogToSupabaseInsert(
   log: DailyLog,
   userId: string,
@@ -121,10 +103,10 @@ export function dailyLogToSupabaseInsert(
     food_score: scores.food,
     presence_score: scores.presence,
     total_score: scores.total,
-    memo: log.memo.note || null,
-    good_point: log.memo.good || null,
-    improvement: log.memo.tomorrow || null,
-    raw_data: remoteRawData(log) as unknown as Json,
+    memo: log.memo.note ?? "",
+    good_point: log.memo.good ?? "",
+    improvement: log.memo.tomorrow ?? "",
+    raw_data: log as unknown as Json,
     created_at: log.createdAt,
   };
 }
@@ -253,6 +235,6 @@ export async function insertDailyLogToSupabase(
 
   return {
     status: "success",
-    message: "SupabaseにもDaily Logを保存しました。",
+    message: "Supabaseに保存しました",
   };
 }
