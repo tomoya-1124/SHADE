@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 
 export async function GET(request: Request) {
   const requestUrl = new URL(request.url);
+  const redirectUrl = new URL("/", request.url);
   const code = requestUrl.searchParams.get("code");
 
   if (code) {
@@ -18,8 +19,12 @@ export async function GET(request: Request) {
     }
 
     const supabase = createClient(supabaseUrl, supabaseAnonKey);
-    await supabase.auth.exchangeCodeForSession(code);
+    const { error } = await supabase.auth.exchangeCodeForSession(code);
+
+    if (error) {
+      redirectUrl.searchParams.set("auth_error", "callback_failed");
+    }
   }
 
-  return NextResponse.redirect(new URL("/", request.url));
+  return NextResponse.redirect(redirectUrl);
 }
